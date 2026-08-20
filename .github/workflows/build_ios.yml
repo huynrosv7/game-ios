@@ -1,0 +1,91 @@
+name: Build iOS IPA (Unity Xcode)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Xcode Environment
+        run: |
+          echo "=== Available Xcode versions ==="
+          ls -d /Applications/Xcode* 2>/dev/null || true
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+          echo "=== SDK versions ==="
+          xcodebuild -showsdks 2>/dev/null | grep iphoneos || true
+
+      - name: Fix IL2CPP Permissions
+        run: |
+          echo "=== Setting execute permissions on IL2CPP tools ==="
+          HOST_ARCH=$(uname -m)
+          IL2CPP_DIR="Il2CppOutputProject/IL2CPP/build/deploy_${HOST_ARCH}"
+          echo "Host arch: $HOST_ARCH"
+          echo "IL2CPP dir: $IL2CPP_DIR"
+
+          if [ -d "$IL2CPP_DIR" ]; then
+            chmod +x "$IL2CPP_DIR/il2cpp" 2>/dev/null || true
+            chmod +x "$IL2CPP_DIR/il2cpp-compile" 2>/dev/null || true
+            chmod +x "$IL2CPP_DIR/createdump" 2>/dev/null || true
+            chmod +x "$IL2CPP_DIR/UnityLinker" 2>/dev/null || true
+            chmod +x "$IL2CPP_DIR/Analytics" 2>/dev/null || true
+
+            # bee_backend
+            if [ -d "$IL2CPP_DIR/bee_backend" ]; then
+              find "$IL2CPP_DIR/bee_backend" -type f -name "bee_backend" -exec chmod +x {} \;
+            fi
+
+            echo "IL2CPP tools permissions set."
+            ls -la "$IL2CPP_DIR/il2cpp" "$IL2CPP_DIR/il2cpp-compile" 2>/dev/null
+            file "$IL2CPP_DIR/il2cpp" 2>/dev/null || true
+          else
+            echo "WARNING: IL2CPP deploy dir not found at $IL2CPP_DIR"
+            echo "Available deploy dirs:"
+            ls -d Il2CppOutputProject/IL2CPP/build/deploy_* 2>/dev/null || echo "None found"
+          fi
+
+      - name: Build Xcode Project (Unsigned / Sideload Ready)
+        run: |
+          xcodebuild clean build \
+            -project Unity-iPhone.xcodeproj \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath derived_data \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Package App into .IPA
+        run: |
+          mkdir -p build_output/Payload
+          APP_PATH=$(find derived_data -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: No .app file found!"
+            find derived_data -type d -maxdepth 5 || true
+            exit 1
+          fi
+          echo "Found compiled app at: $APP_PATH"
+          cp -r "$APP_PATH" build_output/Payload/
+          cd build_output
+          zip -r -q UnityGame.ipa Payload
+          cd ..
+          echo "=== IPA packaging completed successfully! ==="
+          ls -lh build_output/UnityGame.ipa
+
+      - name: Upload IPA to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: UnityGame-iOS-IPA
+          path: build_output/UnityGame.ipa
+          retention-days: 14

@@ -1,0 +1,12 @@
+# Xcode / Unity temp files
+/build/
+/build_output/
+/derived_data/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.pbxuser
+*.xcuserstate
+project.xcworkspace/xcuserdata/
+xcuserdata/
+.DS_Store
